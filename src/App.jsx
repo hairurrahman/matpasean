@@ -4,6 +4,20 @@ import { Image, Plus, Trash2, Check, ChevronLeft, ChevronRight, Save, LayoutDash
 // TODO: MASUKKAN URL GOOGLE APPS SCRIPT ANDA DI SINI
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz2XYhFXI37hbtLsMqMGyXChsGjnj842b5YTuFsl4sQe7hmebsM-qtzhbd5-vsWW3_WhA/exec"; 
 
+// Fungsi pembantu untuk mengubah link Google Drive biasa menjadi Direct Link Gambar
+const formatImageUrl = (url) => {
+  if (!url) return '';
+  // Ekstrak ID dari link Google Drive
+  const driveMatch1 = url.match(/\/file\/d\/([-\w]+)/);
+  const driveMatch2 = url.match(/id=([-\w]+)/);
+  const id = (driveMatch1 && driveMatch1[1]) || (driveMatch2 && driveMatch2[1]);
+  
+  if (id) {
+    return `https://drive.google.com/uc?export=view&id=${id}`;
+  }
+  return url; // Jika bukan link Google Drive, kembalikan seperti aslinya
+};
+
 export default function App() {
   const [mode, setMode] = useState('student'); // 'admin' atau 'student'
   
@@ -16,7 +30,7 @@ export default function App() {
     const fetchQuestions = async () => {
       if (!SCRIPT_URL) {
         setIsLoading(false);
-        return; // Hentikan jika URL belum diisi
+        return; 
       }
       try {
         const response = await fetch(SCRIPT_URL);
@@ -38,7 +52,7 @@ export default function App() {
   const [newQuestionType, setNewQuestionType] = useState('pg');
   const [newQuestionText, setNewQuestionText] = useState('');
   const [newQuestionImage, setNewQuestionImage] = useState('');
-  const [newQuestionScore, setNewQuestionScore] = useState(10); // Default bobot nilai
+  const [newQuestionScore, setNewQuestionScore] = useState(10);
   const [newOptions, setNewOptions] = useState(['', '']);
   const [newCorrectAnswerPG, setNewCorrectAnswerPG] = useState(0);
   const [newCorrectAnswerPGK, setNewCorrectAnswerPGK] = useState([]);
@@ -60,8 +74,7 @@ export default function App() {
   // --- FUNGSI ADMIN ---
   const handleAdminLogin = (e) => {
     e.preventDefault();
-    // HARDCODE Kredensial Admin
-    if (loginForm.username === 'admin' && loginForm.password === 'admin123') {
+    if (loginForm.username === 'admin' && loginForm.password === 'pasean123') {
       setIsAdminLoggedIn(true);
     } else {
       alert("Username atau Password Salah!");
@@ -103,8 +116,10 @@ export default function App() {
     }
 
     try {
+      // mode: 'no-cors' sangat penting agar tidak diblokir saat mengirim data ke Google
       await fetch(SCRIPT_URL, {
         method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'text/plain' }, 
         body: JSON.stringify(newQuestion)
       });
@@ -114,16 +129,16 @@ export default function App() {
       setNewQuestionText(''); setNewQuestionImage(''); setNewOptions(['', '']);
       setNewCorrectAnswerPG(0); setNewCorrectAnswerPGK([]); setNewStatements([{ text: '', correct: 'B' }]);
       setNewQuestionScore(10);
-      alert("Soal berhasil ditambahkan ke Spreadsheet!");
+      alert("Soal berhasil dikirim ke Spreadsheet! (Refresh halaman untuk melihat pembaruan data)");
     } catch (error) {
-      alert("Gagal menyimpan ke Spreadsheet. Periksa koneksi atau URL Script.");
+      alert("Terjadi kesalahan sistem, pastikan Script URL benar.");
     } finally {
       setIsSavingQuestion(false);
     }
   };
 
   const handleDeleteQuestionLocal = (id) => {
-    alert("Hanya menghapus dari tampilan. Untuk menghapus permanen, hapus baris di Spreadsheet Anda.");
+    alert("Hanya menghapus dari tampilan. Untuk menghapus permanen, Anda harus menghapusnya langsung dari Google Spreadsheet.");
     setQuestions(questions.filter(q => q.id !== id));
   };
 
@@ -135,9 +150,8 @@ export default function App() {
       return;
     }
     
-    // --- VALIDASI TOKEN DI SINI ---
-    // Token yang benar disetel menjadi: MATH123
-    if (studentData.token.toUpperCase() !== "MATH123") {
+    // Token validasi
+    if (studentData.token.toUpperCase() !== "MAT123") {
       alert("Token Ujian Salah! Silakan hubungi admin / pengawas.");
       return;
     }
@@ -201,14 +215,15 @@ export default function App() {
           score: totalScore
         };
         
+        // mode: 'no-cors' agar request post diizinkan browser
         await fetch(SCRIPT_URL, {
           method: 'POST',
+          mode: 'no-cors',
           headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify(payload)
         });
       } catch (err) {
         console.error("Gagal simpan skor", err);
-        alert("Gagal menyimpan hasil ke database.");
       }
     }
 
@@ -307,8 +322,8 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2"><Image size={16}/> URL Gambar (Opsional)</label>
-                    <input type="text" value={newQuestionImage} onChange={(e) => setNewQuestionImage(e.target.value)} className="w-full p-2.5 bg-gray-50 border rounded-lg" placeholder="https://..." />
+                    <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2"><Image size={16}/> URL Gambar (Link Google Drive / Web)</label>
+                    <input type="text" value={newQuestionImage} onChange={(e) => setNewQuestionImage(e.target.value)} className="w-full p-2.5 bg-gray-50 border rounded-lg" placeholder="https://drive.google.com/..." />
                   </div>
 
                   <div className="bg-blue-50/50 p-4 rounded-lg border border-blue-100">
@@ -375,6 +390,8 @@ export default function App() {
                       <div>
                         <span className="text-xs bg-gray-200 px-2 py-1 rounded font-bold">No. {index + 1} | {q.type.toUpperCase()} | Score: {q.score || 10}</span>
                         <p className="font-medium mt-2">{q.text}</p>
+                        {/* Menampilkan format gambar di admin preview */}
+                        {q.image && <img src={formatImageUrl(q.image)} alt="Preview" className="h-20 mt-2 object-contain border rounded" />}
                       </div>
                       <button onClick={() => handleDeleteQuestionLocal(q.id)} className="text-red-500 opacity-50 hover:opacity-100 p-1"><Trash2 size={18} /></button>
                     </div>
@@ -469,7 +486,8 @@ export default function App() {
                       <div className="mb-8 text-lg text-gray-800 leading-relaxed">
                         <p className="mb-4 whitespace-pre-line">{questions[currentQIndex].text}</p>
                         {questions[currentQIndex].image && (
-                          <img src={questions[currentQIndex].image} alt="Ilustrasi" className="max-w-full h-auto max-h-64 rounded-lg border object-contain mb-4" />
+                          // Menggunakan formatImageUrl agar link GDrive terbaca sebagai gambar
+                          <img src={formatImageUrl(questions[currentQIndex].image)} alt="Ilustrasi" className="max-w-full h-auto max-h-64 rounded-lg border object-contain mb-4" />
                         )}
                       </div>
 

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Image, Plus, Trash2, Check, LayoutDashboard, GraduationCap, Lock, User, FileText, UploadCloud, AlertCircle, Clock, AlertTriangle, Edit, X } from 'lucide-react';
 
-// TODO: MASUKKAN URL GOOGLE APPS SCRIPT ANDA DI SINI
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwd_oTSw9EffLCSFuj0ksssugHYMAoT7HaC1wuunHFRB6VvOztwPI2J0bTV9SVfgsOjYg/exec"; 
+// TODO: MASUKKAN URL GOOGLE APPS SCRIPT ANDA DI SINI (Pastikan diakhiri dengan /exec)
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwjj6AkTNU8jssEUYXphUVSydfMm6PwcHvG0uaTgppgsW6IXWpFE8pdEQ-nTl-DdaR01g/exec"; 
 
 const DAFTAR_SEKOLAH = [
   "SD Plus Zainuddin", "SDF Al-Falah", "SDI Al-Haromain", "SDI Al-Munawaroh", 
@@ -30,43 +30,43 @@ export default function App() {
   const [questions, setQuestions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Referensi form admin untuk scroll otomatis saat edit
   const adminFormRef = useRef(null);
-
-  // --- KUSTOM POPUP MODAL (Pengganti alert bawaan) ---
   const [popup, setPopup] = useState(null);
 
   const showAlert = (title, message) => setPopup({ type: 'alert', title, message });
   const showConfirm = (title, message, onConfirm) => setPopup({ type: 'confirm', title, message, onConfirm });
 
-  // --- FETCH API SPREADSHEET ATAU LOCALSTORAGE ---
+  // --- FUNGSI LOAD DATA BERLAPIS (Lokal & Cloud) ---
   useEffect(() => {
     const fetchQuestions = async () => {
-      // Jika URL kosong, ambil data dari localStorage agar tidak hilang saat refresh
+      // 1. Coba muat dari LocalStorage dulu sebagai backup agar tidak kosong saat loading/error
+      const savedData = localStorage.getItem('simulasi_soal_lokal');
+      let localQuestions = [];
+      if (savedData) {
+        try {
+          localQuestions = JSON.parse(savedData);
+          setQuestions(localQuestions);
+        } catch (e) { console.error("Error baca lokal", e); }
+      }
+
+      // 2. Jika SCRIPT_URL kosong, selesai sampai di sini.
       if (!SCRIPT_URL) {
-        const savedData = localStorage.getItem('simulasi_soal_lokal');
-        if (savedData) {
-          try {
-            setQuestions(JSON.parse(savedData));
-          } catch (e) {
-            console.error("Gagal membaca data lokal", e);
-            setQuestions([]);
-          }
-        } else {
-          setQuestions([]); // Kosong jika belum ada data
-        }
         setIsLoading(false);
         return; 
       }
       
+      // 3. Jika ada URL, ambil data terbaru dari Spreadsheet
       try {
         const response = await fetch(SCRIPT_URL);
-        if (!response.ok) throw new Error("Respon jaringan bermasalah");
         const data = await response.json();
-        setQuestions(data && data.length > 0 ? data : []); 
+        
+        if (data && Array.isArray(data) && data.length > 0) {
+          setQuestions(data); // Gunakan data dari server
+          localStorage.setItem('simulasi_soal_lokal', JSON.stringify(data)); // Perbarui backup lokal
+        }
       } catch (error) {
-        console.error("Gagal mengambil data dari Spreadsheet:", error);
-        setQuestions([]); // Fallback ke array kosong jika fetch gagal
+        console.error("Gagal ambil data Spreadsheet, menggunakan data lokal:", error);
+        // Tetap gunakan localQuestions yang sudah di-set di atas
       } finally {
         setIsLoading(false);
       }
@@ -76,10 +76,9 @@ export default function App() {
 
   // --- STATE ADMIN ---
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [loginForm, setLoginForm] = useState({ username: 'admin', password: '123' }); // default untuk testing
+  const [loginForm, setLoginForm] = useState({ username: 'admin', password: '123' }); 
   
-  // State untuk form soal
-  const [editingQuestionId, setEditingQuestionId] = useState(null); // Null = Mode Tambah Baru
+  const [editingQuestionId, setEditingQuestionId] = useState(null); 
   const [newQuestionType, setNewQuestionType] = useState('pg');
   const [newQuestionText, setNewQuestionText] = useState('');
   const [newQuestionImage, setNewQuestionImage] = useState('');
@@ -103,10 +102,7 @@ export default function App() {
   const [score, setScore] = useState(0);
   const [isSavingResult, setIsSavingResult] = useState(false);
   
-  // Waktu Ujian (75 Menit = 4500 detik)
   const [timeLeft, setTimeLeft] = useState(75 * 60);
-
-  // --- STATE ANTI KECURANGAN ---
   const [violationCount, setViolationCount] = useState(0);
   const [isDisqualified, setIsDisqualified] = useState(false);
 
@@ -114,11 +110,9 @@ export default function App() {
   useEffect(() => {
     let timer;
     if (isDataConfirmed && !isSubmitted && timeLeft > 0) {
-      timer = setInterval(() => {
-        setTimeLeft((prevTime) => prevTime - 1);
-      }, 1000);
+      timer = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
     } else if (timeLeft <= 0 && !isSubmitted && isDataConfirmed) {
-      showAlert("Waktu Habis", "Waktu pengerjaan telah habis! Jawaban Anda akan dikirim otomatis.");
+      showAlert("Waktu Habis", "Waktu pengerjaan habis! Jawaban Anda dikirim otomatis.");
       calculateAndSubmit(true);
     }
     return () => clearInterval(timer);
@@ -131,17 +125,15 @@ export default function App() {
       if (document.visibilityState === 'hidden' && isDataConfirmed && !isSubmitted && mode === 'student') {
         const newCount = violationCount + 1;
         setViolationCount(newCount);
-
         if (newCount >= 3) {
           setIsDisqualified(true);
-          showAlert("DISKUALIFIKASI!", "Anda telah keluar dari halaman ujian 3 kali. Ujian dihentikan paksa dan data dikirim otomatis.");
+          showAlert("DISKUALIFIKASI!", "Ujian dihentikan paksa dan data dikirim otomatis.");
           calculateAndSubmit(true);
         } else {
-          showAlert("PERINGATAN KECURANGAN!", `Sistem mendeteksi Anda meninggalkan halaman ujian.\n\nPeringatan ke-${newCount} dari maksimal 3 kali pelanggaran.`);
+          showAlert("PERINGATAN KECURANGAN!", `Peringatan ke-${newCount} dari 3 kali pelanggaran maksimal.`);
         }
       }
     };
-
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -153,10 +145,9 @@ export default function App() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // --- FUNGSI ADMIN ---
   const handleAdminLogin = (e) => {
     e.preventDefault();
-    if (loginForm.username === 'admin' && loginForm.password === 'pasean123' || loginForm.password === '123') { 
+    if (loginForm.username === 'admin' && (loginForm.password === 'admin123' || loginForm.password === '123')) { 
       setIsAdminLoggedIn(true);
     } else {
       showAlert("Login Gagal", "Username atau Password Salah!");
@@ -173,59 +164,35 @@ export default function App() {
   const handleAddStatement = () => setNewStatements([...newStatements, { text: '', correct: 'B' }]);
   const handleRemoveStatement = (index) => setNewStatements(newStatements.filter((_, i) => i !== index));
 
-  // Reset form kembali ke mode Tambah Baru
   const resetAdminForm = () => {
-    setEditingQuestionId(null);
-    setNewQuestionType('pg');
-    setNewQuestionText('');
-    setNewQuestionImage('');
-    setNewQuestionScore(10);
-    setNewOptions(['', '']);
-    setNewCorrectAnswerPG(0);
-    setNewCorrectAnswerPGK([]);
-    setNewStatements([{ text: '', correct: 'B' }]);
+    setEditingQuestionId(null); setNewQuestionType('pg'); setNewQuestionText('');
+    setNewQuestionImage(''); setNewQuestionScore(10); setNewOptions(['', '']);
+    setNewCorrectAnswerPG(0); setNewCorrectAnswerPGK([]); setNewStatements([{ text: '', correct: 'B' }]);
   };
 
-  // Memuat data soal ke form untuk diedit
   const handleEditClick = (q) => {
-    setEditingQuestionId(q.id);
-    setNewQuestionType(q.type || 'pg');
-    setNewQuestionText(q.text || '');
-    setNewQuestionImage(q.image || '');
-    setNewQuestionScore(q.score || 10);
+    setEditingQuestionId(q.id); setNewQuestionType(q.type || 'pg'); setNewQuestionText(q.text || '');
+    setNewQuestionImage(q.image || ''); setNewQuestionScore(q.score || 10);
+    const options = q.options || ['', '']; setNewOptions(options.length > 0 ? options : ['', '']);
     
-    // Parse opsi dan jawaban dengan aman
-    const options = q.options || ['', ''];
-    setNewOptions(options.length > 0 ? options : ['', '']);
-    
-    if (q.type === 'pg') {
-      setNewCorrectAnswerPG(typeof q.correctAnswer === 'number' ? q.correctAnswer : 0);
-    } else if (q.type === 'pgk') {
-      setNewCorrectAnswerPGK(Array.isArray(q.correctAnswer) ? q.correctAnswer : []);
-    } else if (q.type === 'bs') {
+    if (q.type === 'pg') setNewCorrectAnswerPG(typeof q.correctAnswer === 'number' ? q.correctAnswer : 0);
+    else if (q.type === 'pgk') setNewCorrectAnswerPGK(Array.isArray(q.correctAnswer) ? q.correctAnswer : []);
+    else if (q.type === 'bs') {
       const statements = q.statements || [{ text: '', correct: 'B' }];
       setNewStatements(statements.length > 0 ? statements : [{ text: '', correct: 'B' }]);
     }
-    
-    // Scroll ke atas (ke form)
-    if (adminFormRef.current) {
-      adminFormRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (adminFormRef.current) adminFormRef.current.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Hapus dari Spreadsheet / LocalStorage
   const handleDeleteQuestion = (id) => {
     showConfirm("Hapus Soal", "Anda yakin ingin menghapus soal ini PERMANEN?", async () => {
-      
       const newQuestionsList = questions.filter(q => q.id !== id);
       setQuestions(newQuestionsList);
+      localStorage.setItem('simulasi_soal_lokal', JSON.stringify(newQuestionsList)); // Selalu update backup lokal
       if (editingQuestionId === id) resetAdminForm(); 
       
-      // Jika mode simulasi (URL kosong), simpan perubahan ke localStorage
       if (!SCRIPT_URL) {
-        localStorage.setItem('simulasi_soal_lokal', JSON.stringify(newQuestionsList));
-        showAlert("Mode Simulasi", "Soal dihapus secara lokal."); 
-        return;
+        showAlert("Berhasil", "Soal dihapus (Mode Lokal)."); return;
       }
 
       setIsDeletingQuestion(true);
@@ -233,74 +200,54 @@ export default function App() {
         await fetch(SCRIPT_URL, {
           method: 'POST',
           mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ action: 'deleteQuestion', id: id })
         });
-        showAlert("Sukses", "Soal berhasil dihapus dari Spreadsheet.");
+        showAlert("Sukses", "Soal berhasil dihapus.");
       } catch (err) {
-        console.error("Gagal menghapus", err);
-        showAlert("Info", "Soal dihapus lokal. Gagal sinkronisasi dengan Spreadsheet.");
+        showAlert("Peringatan", "Terhapus di layar, tapi gagal sinkron ke Spreadsheet.");
       } finally {
         setIsDeletingQuestion(false);
       }
     });
   };
 
-  // Simpan Baru atau Update Edit ke Spreadsheet / LocalStorage
   const handleSaveQuestion = async () => {
     if (!newQuestionText.trim()) { showAlert("Peringatan", "Teks soal tidak boleh kosong!"); return; }
 
     setIsSavingQuestion(true);
-    
     const isEditMode = editingQuestionId !== null;
     const questionId = isEditMode ? editingQuestionId : Date.now();
 
     const payload = {
       action: isEditMode ? 'editQuestion' : 'saveQuestion', 
-      id: questionId,
-      type: newQuestionType,
-      text: newQuestionText,
-      image: newQuestionImage,
-      score: Number(newQuestionScore)
+      id: questionId, type: newQuestionType, text: newQuestionText,
+      image: newQuestionImage, score: Number(newQuestionScore)
     };
 
-    if (newQuestionType === 'pg') {
-      payload.options = newOptions;
-      payload.correctAnswer = newCorrectAnswerPG;
-    } else if (newQuestionType === 'pgk') {
-      payload.options = newOptions;
-      payload.correctAnswer = newCorrectAnswerPGK;
-    } else if (newQuestionType === 'bs') {
-      payload.statements = newStatements;
-    }
+    if (newQuestionType === 'pg') { payload.options = newOptions; payload.correctAnswer = newCorrectAnswerPG; } 
+    else if (newQuestionType === 'pgk') { payload.options = newOptions; payload.correctAnswer = newCorrectAnswerPGK; } 
+    else if (newQuestionType === 'bs') { payload.statements = newStatements; }
 
-    // Update UI Lokal terlebih dahulu (Optimistic UI)
-    const newQuestionsList = isEditMode 
-      ? questions.map(q => q.id === questionId ? payload : q)
-      : [...questions, payload];
-      
+    // Update UI dan Backup Lokal Secara Langsung
+    const newQuestionsList = isEditMode ? questions.map(q => q.id === questionId ? payload : q) : [...questions, payload];
     setQuestions(newQuestionsList);
+    localStorage.setItem('simulasi_soal_lokal', JSON.stringify(newQuestionsList)); // SELALU SIMPAN KE LOKAL
 
-    // Jika mode simulasi (URL kosong), simpan ke localStorage agar awet di-refresh
     if (!SCRIPT_URL) {
-      localStorage.setItem('simulasi_soal_lokal', JSON.stringify(newQuestionsList));
-      showAlert("Mode Simulasi", isEditMode ? "Soal berhasil diperbarui secara lokal." : "Soal baru ditambahkan secara lokal.");
-      resetAdminForm();
-      setIsSavingQuestion(false);
-      return;
+      showAlert("Sukses", "Soal tersimpan (Mode Lokal).");
+      resetAdminForm(); setIsSavingQuestion(false); return;
     }
 
     try {
       await fetch(SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain' }, 
+        method: 'POST', mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
         body: JSON.stringify(payload)
       });
       showAlert("Sukses", "Soal berhasil disinkronisasi ke Spreadsheet!");
       resetAdminForm();
     } catch (error) {
-      console.error("Gagal simpan", error);
       showAlert("Info", "Data disimpan lokal. Koneksi ke Spreadsheet gagal.");
       resetAdminForm();
     } finally {
@@ -308,36 +255,31 @@ export default function App() {
     }
   };
 
-  // --- FUNGSI STUDENT ---
+  // --- FUNGSI PESERTA ---
   const handleStartTest = (e) => {
     e.preventDefault();
     if (!studentData.nama || !studentData.sekolah || !studentData.token) {
-      showAlert("Perhatian", "Harap lengkapi semua data diri dan Token!"); return;
+      showAlert("Perhatian", "Lengkapi semua data diri dan Token!"); return;
     }
-    if (studentData.token.toUpperCase() !== "MAT123") {
-      showAlert("Akses Ditolak", "Token Ujian Salah! Silakan tanyakan kepada pengawas."); return;
+    if (studentData.token.toUpperCase() !== "MATH123") {
+      showAlert("Ditolak", "Token Ujian Salah!"); return;
     }
     
     showConfirm(
-      "Aturan Ujian (PENTING!)", 
-      "1. Waktu pengerjaan 75 Menit.\n2. DILARANG keluar dari layar/tab browser (Membuka aplikasi lain, Minimize layar, atau pindah tab).\n3. Pelanggaran sistem ini maksimal 3 kali, otomatis DIDISKUALIFIKASI.\n\nApakah Anda siap memulai?",
+      "Aturan Ujian", "DILARANG keluar dari layar/tab browser. Maksimal 3x peringatan akan didiskualifikasi.\n\nSiap memulai?",
       () => {
-        setIsDataConfirmed(true);
-        setTimeLeft(75 * 60);
-        setViolationCount(0);
-        setIsDisqualified(false);
+        setIsDataConfirmed(true); setTimeLeft(75 * 60);
+        setViolationCount(0); setIsDisqualified(false);
       }
     );
   };
 
   const handleAnswerPG = (qId, optionIndex) => setUserAnswers({ ...userAnswers, [qId]: optionIndex });
-  
   const handleAnswerPGK = (qId, optionIndex) => {
     const currentAns = userAnswers[qId] || [];
     let newAns = currentAns.includes(optionIndex) ? currentAns.filter(i => i !== optionIndex) : [...currentAns, optionIndex];
     setUserAnswers({ ...userAnswers, [qId]: newAns });
   };
-
   const handleAnswerBS = (qId, statementIndex, value) => {
     const currentAns = userAnswers[qId] || {};
     setUserAnswers({ ...userAnswers, [qId]: { ...currentAns, [statementIndex]: value } });
@@ -350,13 +292,11 @@ export default function App() {
     questions.forEach(q => {
       const userAns = userAnswers[q.id];
       if (userAns === undefined) return; 
-      
       const qScore = Number(q.score) || 10; 
 
       if (q.type === 'pg') {
         if (parseInt(userAns) === parseInt(q.correctAnswer)) totalScore += qScore;
-      } 
-      else if (q.type === 'pgk') {
+      } else if (q.type === 'pgk') {
         const optionsCount = (q.options || []).length || 1;
         const weightPerOption = qScore / optionsCount;
         if (userAns.length > 0) {
@@ -366,8 +306,7 @@ export default function App() {
             if (isUserChecked === isCorrectChecked) totalScore += weightPerOption;
           });
         }
-      } 
-      else if (q.type === 'bs') {
+      } else if (q.type === 'bs') {
         const statementsCount = (q.statements || []).length || 1;
         const weightPerStatement = qScore / statementsCount;
         if (Object.keys(userAns).length > 0) {
@@ -385,26 +324,20 @@ export default function App() {
       try {
         const payload = {
           action: 'saveResult',
-          nama: studentData.nama,
-          gender: studentData.gender,
+          nama: studentData.nama, gender: studentData.gender,
           tglLahir: `${studentData.hari} ${studentData.bulan} ${studentData.tahun}`,
-          sekolah: studentData.sekolah,
-          token: studentData.token,
+          sekolah: studentData.sekolah, token: studentData.token,
           score: isDisqualified ? 0 : totalScore 
         };
-        if (isDisqualified) {
-           payload.nama = `${studentData.nama} (DISKUALIFIKASI)`;
-        }
+        if (isDisqualified) payload.nama = `${studentData.nama} (DISKUALIFIKASI)`;
         
         await fetch(SCRIPT_URL, {
           method: 'POST',
           mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain' },
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload)
         });
-      } catch (err) {
-        console.error("Gagal simpan skor", err);
-      }
+      } catch (err) { console.error("Gagal simpan skor ke cloud", err); }
     }
 
     setIsSavingResult(false);
@@ -412,25 +345,21 @@ export default function App() {
   };
 
   const calculateAndSubmit = (isAutoSubmit = false) => {
-    if (isAutoSubmit) {
-      processSubmission();
-    } else {
-      showConfirm("Selesaikan Ujian?", "Yakin ingin menyelesaikan ujian? Jawaban tidak bisa diubah lagi.", () => processSubmission());
-    }
+    if (isAutoSubmit) processSubmission();
+    else showConfirm("Selesaikan Ujian?", "Yakin ingin menyelesaikan? Jawaban tidak bisa diubah lagi.", () => processSubmission());
   };
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
         <GraduationCap size={56} className="text-blue-600 mb-4 animate-bounce" />
-        <div className="text-xl font-bold text-blue-800 animate-pulse">Memuat Soal TKA</div>
+        <div className="text-xl font-bold text-blue-800 animate-pulse">Memuat Data TRY OUT...</div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative">
-      {/* POPUP MODAL */}
       {popup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className={`bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full text-center border-t-8 ${popup.type === 'confirm' ? 'border-blue-500' : 'border-red-500'} animate-in fade-in zoom-in duration-200`}>
@@ -502,8 +431,8 @@ export default function App() {
             <div className="space-y-8">
                {!SCRIPT_URL && (
                 <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg flex gap-3 items-center">
-                  <AlertCircle size={24}/>
-                  <div><strong>Mode Simulasi Aktif:</strong> SCRIPT_URL kosong. Perubahan (Tambah/Edit/Hapus) tersimpan sementara di browser Anda (LocalStorage) agar tidak hilang saat di-refresh. <strong>Belum</strong> masuk ke Spreadsheet Anda.</div>
+                  <AlertCircle size={24} className="shrink-0"/>
+                  <div className="text-sm"><strong>Mode Sinkronisasi Dinonaktifkan:</strong> URL Spreadsheet belum diisi. Soal yang Anda buat hanya tersimpan di browser ini (Lokal). Nilai siswa tidak akan terkirim.</div>
                 </div>
               )}
 
@@ -511,7 +440,7 @@ export default function App() {
               <div ref={adminFormRef} className={`p-6 rounded-xl shadow-sm border transition-all duration-300 ${editingQuestionId ? 'bg-yellow-50 border-yellow-300 ring-2 ring-yellow-400' : 'bg-white border-gray-200'}`}>
                 <div className="flex justify-between items-center mb-6 border-b pb-2">
                   <h2 className={`text-2xl font-bold flex items-center gap-2 ${editingQuestionId ? 'text-yellow-800' : 'text-gray-800'}`}>
-                    {editingQuestionId ? <><Edit size={24}/> Edit Soal (ID: {editingQuestionId})</> : <><FileText size={24} className="text-blue-600"/> Buat Soal Baru</>}
+                    {editingQuestionId ? <><Edit size={24}/> Edit Soal</> : <><FileText size={24} className="text-blue-600"/> Buat Soal Baru</>}
                   </h2>
                   {editingQuestionId && (
                     <button onClick={resetAdminForm} className="text-sm font-bold flex items-center gap-1 bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200">
@@ -605,18 +534,17 @@ export default function App() {
                 </div>
               </div>
 
-              {/* DAFTAR SOAL TERMUAT (Bisa Edit & Delete) */}
+              {/* DAFTAR SOAL TERMUAT */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
                 <h2 className="text-xl font-bold mb-4 border-b pb-2 flex items-center gap-2">
-                  Daftar Soal Termuat ({questions.length}) 
-                  {isDeletingQuestion && <span className="text-xs text-red-500 animate-pulse bg-red-50 px-2 py-1 rounded">Sedang menghapus data...</span>}
+                  Daftar Soal Tersimpan ({questions.length}) 
+                  {isDeletingQuestion && <span className="text-xs text-red-500 animate-pulse bg-red-50 px-2 py-1 rounded">Sedang menghapus...</span>}
                 </h2>
                 <div className="space-y-4">
                   {questions.length === 0 ? (
                     <div className="text-center text-gray-500 py-10 bg-gray-50 rounded-lg border border-dashed">
                       <FileText size={48} className="mx-auto text-gray-300 mb-3" />
-                      <p className="font-semibold">Belum ada soal yang ditambahkan.</p>
-                      <p className="text-sm text-gray-400 mt-1">Silakan buat soal baru melalui form di atas.</p>
+                      <p className="font-semibold">Belum ada soal.</p>
                     </div>
                   ) : (
                     questions.map((q, index) => (
@@ -661,27 +589,6 @@ export default function App() {
                     <input type="text" value={studentData.nama} onChange={e => setStudentData({...studentData, nama: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-lg uppercase" required />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Jenis Kelamin</label>
-                    <select value={studentData.gender} onChange={e => setStudentData({...studentData, gender: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-lg">
-                      <option value="Laki-laki">Laki-laki</option>
-                      <option value="Perempuan">Perempuan</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Tanggal Lahir</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      <select value={studentData.hari} onChange={e => setStudentData({...studentData, hari: e.target.value})} className="p-3 bg-gray-50 border rounded-lg">
-                        {[...Array(31)].map((_,i) => <option key={i+1} value={i+1}>{i+1}</option>)}
-                      </select>
-                      <select value={studentData.bulan} onChange={e => setStudentData({...studentData, bulan: e.target.value})} className="p-3 bg-gray-50 border rounded-lg">
-                        {['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'].map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={studentData.tahun} onChange={e => setStudentData({...studentData, tahun: e.target.value})} className="p-3 bg-gray-50 border rounded-lg">
-                        {[...Array(20)].map((_,i) => <option key={new Date().getFullYear() - 5 - i} value={new Date().getFullYear() - 5 - i}>{new Date().getFullYear() - 5 - i}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">Asal Sekolah</label>
                     <select value={studentData.sekolah} onChange={e => setStudentData({...studentData, sekolah: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-lg uppercase" required>
                       <option value="" disabled>-- PILIH ASAL SEKOLAH --</option>
@@ -702,7 +609,7 @@ export default function App() {
               <div className="bg-white p-8 rounded-xl shadow-md text-center border-t-8 border-green-500">
                 {isDisqualified && (
                   <div className="bg-red-100 text-red-800 border-2 border-red-500 p-4 rounded-xl mb-6 font-bold flex flex-col items-center justify-center gap-2 shadow-sm">
-                    <AlertTriangle size={32}/> <span>ANDA TELAH DIDISKUALIFIKASI (KELUAR DARI APLIKASI).</span>
+                    <AlertTriangle size={32}/> <span>ANDA TELAH DIDISKUALIFIKASI.</span>
                   </div>
                 )}
                 <Check size={64} className="mx-auto text-green-500 mb-4" />
@@ -711,11 +618,6 @@ export default function App() {
                 <div className="inline-block bg-blue-50 border border-blue-100 p-6 rounded-2xl mb-8">
                   <p className="text-sm text-blue-800 font-semibold mb-1">Total Skor Anda</p>
                   <p className="text-6xl font-black text-blue-600">{score}</p>
-                </div>
-                <div className="text-left bg-gray-50 p-4 rounded-lg inline-block border text-sm w-full max-w-sm mx-auto">
-                  <p><strong>Nama:</strong> {studentData.nama.toUpperCase()}</p>
-                  <p><strong>Sekolah:</strong> {studentData.sekolah.toUpperCase()}</p>
-                  {isDisqualified && <p className="text-red-600 font-bold mt-2">Status: DISKUALIFIKASI</p>}
                 </div>
               </div>
             ) : (
@@ -789,7 +691,7 @@ export default function App() {
                     </>
                   )}
                   <div className="flex justify-between items-center pt-4 border-t">
-                    <button onClick={() => setCurrentQIndex(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className={`px-4 py-2 font-medium ${currentQIndex === 0 ? 'text-gray-400' : 'text-blue-600'}`}>Sedang Sebelumnya</button>
+                    <button onClick={() => setCurrentQIndex(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className={`px-4 py-2 font-medium ${currentQIndex === 0 ? 'text-gray-400' : 'text-blue-600'}`}>Sebelumnya</button>
                     {questions.length > 0 && currentQIndex === questions.length - 1 ? (
                       <button onClick={() => calculateAndSubmit(false)} disabled={isSavingResult} className="bg-green-600 text-white px-6 py-2 rounded font-bold hover:bg-green-700 transition">
                         {isSavingResult ? 'Menyimpan...' : 'Selesai Ujian'}

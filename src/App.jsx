@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Image, Plus, Trash2, Check, LayoutDashboard, GraduationCap, Lock, User, FileText, UploadCloud, AlertCircle, Clock, AlertTriangle, Edit, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Image, Plus, Trash2, Check, LayoutDashboard, GraduationCap, Lock, User, FileText, UploadCloud, AlertCircle, Clock, AlertTriangle } from 'lucide-react';
 
-// TODO: MASUKKAN URL GOOGLE APPS SCRIPT ANDA DI SINI (Pastikan diakhiri dengan /exec)
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwjj6AkTNU8jssEUYXphUVSydfMm6PwcHvG0uaTgppgsW6IXWpFE8pdEQ-nTl-DdaR01g/exec"; 
+// TODO: MASUKKAN URL GOOGLE APPS SCRIPT ANDA DI SINI
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyQmMcDTKnEudR7ifkhX6wgSgv2sMsmIO673WLOXzifAHtaqGZ1DX1995ux0aFVmc3gDg/exec"; 
 
 const DAFTAR_SEKOLAH = [
   "SD Plus Zainuddin", "SDF Al-Falah", "SDI Al-Haromain", "SDI Al-Munawaroh", 
@@ -30,43 +30,25 @@ export default function App() {
   const [questions, setQuestions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const adminFormRef = useRef(null);
-  const [popup, setPopup] = useState(null);
+  // --- KUSTOM POPUP MODAL (Pengganti alert bawaan) ---
+  const [popup, setPopup] = useState(null); // { type: 'alert'|'confirm', title, message, onConfirm }
 
   const showAlert = (title, message) => setPopup({ type: 'alert', title, message });
   const showConfirm = (title, message, onConfirm) => setPopup({ type: 'confirm', title, message, onConfirm });
 
-  // --- FUNGSI LOAD DATA BERLAPIS (Lokal & Cloud) ---
+  // --- FETCH API SPREADSHEET ---
   useEffect(() => {
     const fetchQuestions = async () => {
-      // 1. Coba muat dari LocalStorage dulu sebagai backup agar tidak kosong saat loading/error
-      const savedData = localStorage.getItem('simulasi_soal_lokal');
-      let localQuestions = [];
-      if (savedData) {
-        try {
-          localQuestions = JSON.parse(savedData);
-          setQuestions(localQuestions);
-        } catch (e) { console.error("Error baca lokal", e); }
-      }
-
-      // 2. Jika SCRIPT_URL kosong, selesai sampai di sini.
       if (!SCRIPT_URL) {
         setIsLoading(false);
         return; 
       }
-      
-      // 3. Jika ada URL, ambil data terbaru dari Spreadsheet
       try {
         const response = await fetch(SCRIPT_URL);
         const data = await response.json();
-        
-        if (data && Array.isArray(data) && data.length > 0) {
-          setQuestions(data); // Gunakan data dari server
-          localStorage.setItem('simulasi_soal_lokal', JSON.stringify(data)); // Perbarui backup lokal
-        }
+        setQuestions(data); 
       } catch (error) {
-        console.error("Gagal ambil data Spreadsheet, menggunakan data lokal:", error);
-        // Tetap gunakan localQuestions yang sudah di-set di atas
+        console.error("Gagal mengambil data dari Spreadsheet:", error);
       } finally {
         setIsLoading(false);
       }
@@ -76,9 +58,8 @@ export default function App() {
 
   // --- STATE ADMIN ---
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [loginForm, setLoginForm] = useState({ username: 'admin', password: '123' }); 
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   
-  const [editingQuestionId, setEditingQuestionId] = useState(null); 
   const [newQuestionType, setNewQuestionType] = useState('pg');
   const [newQuestionText, setNewQuestionText] = useState('');
   const [newQuestionImage, setNewQuestionImage] = useState('');
@@ -87,22 +68,24 @@ export default function App() {
   const [newCorrectAnswerPG, setNewCorrectAnswerPG] = useState(0);
   const [newCorrectAnswerPGK, setNewCorrectAnswerPGK] = useState([]);
   const [newStatements, setNewStatements] = useState([{ text: '', correct: 'B' }]);
-  
   const [isSavingQuestion, setIsSavingQuestion] = useState(false);
-  const [isDeletingQuestion, setIsDeletingQuestion] = useState(false);
 
   // --- STATE STUDENT ---
   const [isDataConfirmed, setIsDataConfirmed] = useState(false);
   const [studentData, setStudentData] = useState({
     nama: '', gender: 'Laki-laki', hari: '1', bulan: 'Januari', tahun: '2010', sekolah: '', token: ''
   });
+  
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState({});
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [score, setScore] = useState(0);
   const [isSavingResult, setIsSavingResult] = useState(false);
   
+  // Waktu Ujian (75 Menit = 4500 detik)
   const [timeLeft, setTimeLeft] = useState(75 * 60);
+
+  // --- STATE ANTI KECURANGAN ---
   const [violationCount, setViolationCount] = useState(0);
   const [isDisqualified, setIsDisqualified] = useState(false);
 
@@ -110,32 +93,43 @@ export default function App() {
   useEffect(() => {
     let timer;
     if (isDataConfirmed && !isSubmitted && timeLeft > 0) {
-      timer = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
+      timer = setInterval(() => {
+        setTimeLeft((prevTime) => prevTime - 1);
+      }, 1000);
     } else if (timeLeft <= 0 && !isSubmitted && isDataConfirmed) {
-      showAlert("Waktu Habis", "Waktu pengerjaan habis! Jawaban Anda dikirim otomatis.");
+      showAlert("Waktu Habis", "Waktu pengerjaan telah habis! Jawaban Anda akan dikirim otomatis.");
       calculateAndSubmit(true);
     }
     return () => clearInterval(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDataConfirmed, isSubmitted, timeLeft, userAnswers, questions]); 
+  // Menambahkan dependencies userAnswers & questions agar saat auto-submit data jawaban yang terkirim adalah data terbaru.
 
-  // --- ANTI CHEAT EFFECT ---
+  // --- ANTI CHEAT EFFECT (Mendeteksi pindah Tab/Aplikasi) ---
   useEffect(() => {
     const handleVisibilityChange = () => {
+      // Jika dokumen menjadi tidak terlihat (pindah tab atau minimize) saat ujian berlangsung
       if (document.visibilityState === 'hidden' && isDataConfirmed && !isSubmitted && mode === 'student') {
         const newCount = violationCount + 1;
         setViolationCount(newCount);
+
         if (newCount >= 3) {
           setIsDisqualified(true);
-          showAlert("DISKUALIFIKASI!", "Ujian dihentikan paksa dan data dikirim otomatis.");
-          calculateAndSubmit(true);
+          showAlert("DISKUALIFIKASI!", "Anda telah keluar dari halaman ujian 3 kali. Ujian dihentikan paksa dan data dikirim otomatis.");
+          calculateAndSubmit(true); // Kirim paksa
         } else {
-          showAlert("PERINGATAN KECURANGAN!", `Peringatan ke-${newCount} dari 3 kali pelanggaran maksimal.`);
+          showAlert(
+            "PERINGATAN KECURANGAN!", 
+            `Sistem mendeteksi Anda meninggalkan halaman ujian.\n\nPeringatan ke-${newCount} dari maksimal 3 kali pelanggaran. Jika mencapai 3 kali, Anda akan didiskualifikasi otomatis!`
+          );
         }
       }
     };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDataConfirmed, isSubmitted, mode, violationCount, userAnswers, questions]);
 
@@ -145,12 +139,13 @@ export default function App() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // --- FUNGSI ADMIN ---
   const handleAdminLogin = (e) => {
     e.preventDefault();
-    if (loginForm.username === 'admin' && (loginForm.password === 'admin123' || loginForm.password === '123')) { 
+    if (loginForm.username === 'admin' && loginForm.password === 'pasean123') {
       setIsAdminLoggedIn(true);
     } else {
-      showAlert("Login Gagal", "Username atau Password Salah!");
+      showAlert("Login Gagal", "Username atau Password yang Anda masukkan Salah!");
     }
   };
 
@@ -164,122 +159,87 @@ export default function App() {
   const handleAddStatement = () => setNewStatements([...newStatements, { text: '', correct: 'B' }]);
   const handleRemoveStatement = (index) => setNewStatements(newStatements.filter((_, i) => i !== index));
 
-  const resetAdminForm = () => {
-    setEditingQuestionId(null); setNewQuestionType('pg'); setNewQuestionText('');
-    setNewQuestionImage(''); setNewQuestionScore(10); setNewOptions(['', '']);
-    setNewCorrectAnswerPG(0); setNewCorrectAnswerPGK([]); setNewStatements([{ text: '', correct: 'B' }]);
-  };
-
-  const handleEditClick = (q) => {
-    setEditingQuestionId(q.id); setNewQuestionType(q.type || 'pg'); setNewQuestionText(q.text || '');
-    setNewQuestionImage(q.image || ''); setNewQuestionScore(q.score || 10);
-    const options = q.options || ['', '']; setNewOptions(options.length > 0 ? options : ['', '']);
-    
-    if (q.type === 'pg') setNewCorrectAnswerPG(typeof q.correctAnswer === 'number' ? q.correctAnswer : 0);
-    else if (q.type === 'pgk') setNewCorrectAnswerPGK(Array.isArray(q.correctAnswer) ? q.correctAnswer : []);
-    else if (q.type === 'bs') {
-      const statements = q.statements || [{ text: '', correct: 'B' }];
-      setNewStatements(statements.length > 0 ? statements : [{ text: '', correct: 'B' }]);
-    }
-    if (adminFormRef.current) adminFormRef.current.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const handleDeleteQuestion = (id) => {
-    showConfirm("Hapus Soal", "Anda yakin ingin menghapus soal ini PERMANEN?", async () => {
-      const newQuestionsList = questions.filter(q => q.id !== id);
-      setQuestions(newQuestionsList);
-      localStorage.setItem('simulasi_soal_lokal', JSON.stringify(newQuestionsList)); // Selalu update backup lokal
-      if (editingQuestionId === id) resetAdminForm(); 
-      
-      if (!SCRIPT_URL) {
-        showAlert("Berhasil", "Soal dihapus (Mode Lokal)."); return;
-      }
-
-      setIsDeletingQuestion(true);
-      try {
-        await fetch(SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'deleteQuestion', id: id })
-        });
-        showAlert("Sukses", "Soal berhasil dihapus.");
-      } catch (err) {
-        showAlert("Peringatan", "Terhapus di layar, tapi gagal sinkron ke Spreadsheet.");
-      } finally {
-        setIsDeletingQuestion(false);
-      }
-    });
-  };
-
   const handleSaveQuestion = async () => {
     if (!newQuestionText.trim()) { showAlert("Peringatan", "Teks soal tidak boleh kosong!"); return; }
+    if (!SCRIPT_URL) { showAlert("Peringatan", "Masukkan SCRIPT_URL terlebih dahulu di kode aplikasi!"); return; }
 
     setIsSavingQuestion(true);
-    const isEditMode = editingQuestionId !== null;
-    const questionId = isEditMode ? editingQuestionId : Date.now();
-
-    const payload = {
-      action: isEditMode ? 'editQuestion' : 'saveQuestion', 
-      id: questionId, type: newQuestionType, text: newQuestionText,
-      image: newQuestionImage, score: Number(newQuestionScore)
+    const newQuestion = {
+      action: 'saveQuestion', 
+      id: Date.now(),
+      type: newQuestionType,
+      text: newQuestionText,
+      image: newQuestionImage,
+      score: Number(newQuestionScore)
     };
 
-    if (newQuestionType === 'pg') { payload.options = newOptions; payload.correctAnswer = newCorrectAnswerPG; } 
-    else if (newQuestionType === 'pgk') { payload.options = newOptions; payload.correctAnswer = newCorrectAnswerPGK; } 
-    else if (newQuestionType === 'bs') { payload.statements = newStatements; }
-
-    // Update UI dan Backup Lokal Secara Langsung
-    const newQuestionsList = isEditMode ? questions.map(q => q.id === questionId ? payload : q) : [...questions, payload];
-    setQuestions(newQuestionsList);
-    localStorage.setItem('simulasi_soal_lokal', JSON.stringify(newQuestionsList)); // SELALU SIMPAN KE LOKAL
-
-    if (!SCRIPT_URL) {
-      showAlert("Sukses", "Soal tersimpan (Mode Lokal).");
-      resetAdminForm(); setIsSavingQuestion(false); return;
+    if (newQuestionType === 'pg') {
+      newQuestion.options = newOptions;
+      newQuestion.correctAnswer = newCorrectAnswerPG;
+    } else if (newQuestionType === 'pgk') {
+      newQuestion.options = newOptions;
+      newQuestion.correctAnswer = newCorrectAnswerPGK;
+    } else if (newQuestionType === 'bs') {
+      newQuestion.statements = newStatements;
     }
 
     try {
       await fetch(SCRIPT_URL, {
-        method: 'POST', mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
-        body: JSON.stringify(payload)
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' }, 
+        body: JSON.stringify(newQuestion)
       });
-      showAlert("Sukses", "Soal berhasil disinkronisasi ke Spreadsheet!");
-      resetAdminForm();
+      
+      setQuestions([...questions, newQuestion]);
+      
+      setNewQuestionText(''); setNewQuestionImage(''); setNewOptions(['', '']);
+      setNewCorrectAnswerPG(0); setNewCorrectAnswerPGK([]); setNewStatements([{ text: '', correct: 'B' }]);
+      setNewQuestionScore(10);
+      showAlert("Sukses", "Soal berhasil dikirim ke Spreadsheet!");
     } catch (error) {
-      showAlert("Info", "Data disimpan lokal. Koneksi ke Spreadsheet gagal.");
-      resetAdminForm();
+      showAlert("Error", "Terjadi kesalahan sistem, pastikan Script URL benar.");
     } finally {
       setIsSavingQuestion(false);
     }
   };
 
-  // --- FUNGSI PESERTA ---
+  const handleDeleteQuestionLocal = (id) => {
+    showAlert("Info", "Hanya menghapus dari tampilan. Hapus baris di Google Sheet untuk menghapus permanen.");
+    setQuestions(questions.filter(q => q.id !== id));
+  };
+
+  // --- FUNGSI STUDENT ---
   const handleStartTest = (e) => {
     e.preventDefault();
     if (!studentData.nama || !studentData.sekolah || !studentData.token) {
-      showAlert("Perhatian", "Lengkapi semua data diri dan Token!"); return;
+      showAlert("Perhatian", "Harap lengkapi semua data diri dan Token!"); return;
     }
-    if (studentData.token.toUpperCase() !== "MATH123") {
-      showAlert("Ditolak", "Token Ujian Salah!"); return;
+    if (studentData.token.toUpperCase() !== "MAT123") {
+      showAlert("Akses Ditolak", "Token Ujian Salah! Silakan tanyakan kepada pengawas."); return;
     }
     
+    // Tampilkan Aturan Ujian sebelum mulai
     showConfirm(
-      "Aturan Ujian", "DILARANG keluar dari layar/tab browser. Maksimal 3x peringatan akan didiskualifikasi.\n\nSiap memulai?",
+      "Aturan Ujian (PENTING!)", 
+      "1. Waktu pengerjaan 75 Menit.\n2. DILARANG keluar dari layar/tab browser (Membuka aplikasi lain, Minimize layar, atau pindah tab).\n3. Pelanggaran sistem ini maksimal 3 kali, lebih dari itu otomatis DIDISKUALIFIKASI.\n\nApakah Anda siap memulai?",
       () => {
-        setIsDataConfirmed(true); setTimeLeft(75 * 60);
-        setViolationCount(0); setIsDisqualified(false);
+        setIsDataConfirmed(true);
+        setTimeLeft(75 * 60); // Reset timer ke 75 menit
+        setViolationCount(0);
+        setIsDisqualified(false);
       }
     );
   };
 
   const handleAnswerPG = (qId, optionIndex) => setUserAnswers({ ...userAnswers, [qId]: optionIndex });
+  
   const handleAnswerPGK = (qId, optionIndex) => {
     const currentAns = userAnswers[qId] || [];
     let newAns = currentAns.includes(optionIndex) ? currentAns.filter(i => i !== optionIndex) : [...currentAns, optionIndex];
     setUserAnswers({ ...userAnswers, [qId]: newAns });
   };
+
   const handleAnswerBS = (qId, statementIndex, value) => {
     const currentAns = userAnswers[qId] || {};
     setUserAnswers({ ...userAnswers, [qId]: { ...currentAns, [statementIndex]: value } });
@@ -292,13 +252,16 @@ export default function App() {
     questions.forEach(q => {
       const userAns = userAnswers[q.id];
       if (userAns === undefined) return; 
+      
       const qScore = Number(q.score) || 10; 
 
       if (q.type === 'pg') {
         if (parseInt(userAns) === parseInt(q.correctAnswer)) totalScore += qScore;
-      } else if (q.type === 'pgk') {
+      } 
+      else if (q.type === 'pgk') {
         const optionsCount = (q.options || []).length || 1;
         const weightPerOption = qScore / optionsCount;
+        
         if (userAns.length > 0) {
           (q.options || []).forEach((_, idx) => {
             const isUserChecked = userAns.includes(idx);
@@ -306,9 +269,11 @@ export default function App() {
             if (isUserChecked === isCorrectChecked) totalScore += weightPerOption;
           });
         }
-      } else if (q.type === 'bs') {
+      } 
+      else if (q.type === 'bs') {
         const statementsCount = (q.statements || []).length || 1;
         const weightPerStatement = qScore / statementsCount;
+        
         if (Object.keys(userAns).length > 0) {
           (q.statements || []).forEach((stmt, idx) => {
             if (userAns[idx] === stmt.correct) totalScore += weightPerStatement;
@@ -324,20 +289,27 @@ export default function App() {
       try {
         const payload = {
           action: 'saveResult',
-          nama: studentData.nama, gender: studentData.gender,
+          nama: studentData.nama,
+          gender: studentData.gender,
           tglLahir: `${studentData.hari} ${studentData.bulan} ${studentData.tahun}`,
-          sekolah: studentData.sekolah, token: studentData.token,
-          score: isDisqualified ? 0 : totalScore 
+          sekolah: studentData.sekolah,
+          token: studentData.token,
+          score: isDisqualified ? 0 : totalScore // Jika diskualifikasi bisa dikirim skor 0 atau biarkan aslinya, disini biarkan asli
         };
-        if (isDisqualified) payload.nama = `${studentData.nama} (DISKUALIFIKASI)`;
+        // Tambahkan keterangan diskualifikasi ke dalam nama jika terkena diskualifikasi
+        if (isDisqualified) {
+           payload.nama = `${studentData.nama} (DISKUALIFIKASI)`;
+        }
         
         await fetch(SCRIPT_URL, {
           method: 'POST',
           mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify(payload)
         });
-      } catch (err) { console.error("Gagal simpan skor ke cloud", err); }
+      } catch (err) {
+        console.error("Gagal simpan skor", err);
+      }
     }
 
     setIsSavingResult(false);
@@ -345,35 +317,56 @@ export default function App() {
   };
 
   const calculateAndSubmit = (isAutoSubmit = false) => {
-    if (isAutoSubmit) processSubmission();
-    else showConfirm("Selesaikan Ujian?", "Yakin ingin menyelesaikan? Jawaban tidak bisa diubah lagi.", () => processSubmission());
+    if (isAutoSubmit) {
+      processSubmission();
+    } else {
+      showConfirm(
+        "Selesaikan Ujian?", 
+        "Apakah Anda yakin ingin menyelesaikan ujian sekarang? Jawaban yang sudah dikirim tidak bisa diubah lagi.",
+        () => processSubmission()
+      );
+    }
   };
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
         <GraduationCap size={56} className="text-blue-600 mb-4 animate-bounce" />
-        <div className="text-xl font-bold text-blue-800 animate-pulse">Memuat Data TRY OUT...</div>
+        <div className="text-xl font-bold text-blue-800 animate-pulse">Memuat Soal TKA</div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans relative">
+      {/* POPUP MODAL (Pengganti Alert/Confirm Bawaan Browser) */}
       {popup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className={`bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full text-center border-t-8 ${popup.type === 'confirm' ? 'border-blue-500' : 'border-red-500'} animate-in fade-in zoom-in duration-200`}>
-            {popup.type === 'confirm' ? <AlertCircle size={56} className="mx-auto text-blue-500 mb-4" /> : <AlertTriangle size={56} className="mx-auto text-red-500 mb-4" />}
+            {popup.type === 'confirm' ? (
+               <AlertCircle size={56} className="mx-auto text-blue-500 mb-4" />
+            ) : (
+               <AlertTriangle size={56} className="mx-auto text-red-500 mb-4" />
+            )}
+            
             <h3 className="text-2xl font-bold mb-3 text-gray-800">{popup.title}</h3>
             <p className="text-gray-600 mb-6 whitespace-pre-wrap leading-relaxed">{popup.message}</p>
+            
             <div className="flex justify-center gap-3">
               {popup.type === 'confirm' && (
-                <button onClick={() => setPopup(null)} className="flex-1 py-3 rounded-lg bg-gray-200 text-gray-800 font-bold hover:bg-gray-300 transition">Batal</button>
+                <button onClick={() => setPopup(null)} className="flex-1 py-3 rounded-lg bg-gray-200 text-gray-800 font-bold hover:bg-gray-300 transition">
+                  Batal
+                </button>
               )}
               <button 
-                onClick={() => { if (popup.onConfirm) popup.onConfirm(); setPopup(null); }} 
+                onClick={() => {
+                  if (popup.onConfirm) popup.onConfirm();
+                  setPopup(null);
+                }} 
                 className={`flex-1 py-3 rounded-lg text-white font-bold transition ${popup.type === 'confirm' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'}`}
-              >Mengerti</button>
+              >
+                Mengerti
+              </button>
             </div>
           </div>
         </div>
@@ -383,7 +376,7 @@ export default function App() {
         <div className="flex items-center gap-3">
           <GraduationCap size={28} />
           <h1 className="text-xl font-bold uppercase tracking-wider hidden sm:block">TRY OUT TKA Kec. Pasean</h1>
-          <h1 className="text-xl font-bold uppercase tracking-wider sm:hidden">TO TKA</h1>
+          <h1 className="text-xl font-bold uppercase tracking-wider sm:hidden">TKA KEC. PASEAN</h1>
         </div>
         
         <div className="flex items-center gap-4">
@@ -409,6 +402,7 @@ export default function App() {
       <main className="max-w-5xl mx-auto p-4 sm:p-6">
         
         {mode === 'admin' ? (
+          /* AREA ADMIN (Tidak ada perubahan) */
           !isAdminLoggedIn ? (
             <div className="max-w-md mx-auto mt-10 bg-white p-8 rounded-xl shadow border">
               <div className="text-center mb-6">
@@ -430,30 +424,22 @@ export default function App() {
           ) : (
             <div className="space-y-8">
                {!SCRIPT_URL && (
-                <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg flex gap-3 items-center">
-                  <AlertCircle size={24} className="shrink-0"/>
-                  <div className="text-sm"><strong>Mode Sinkronisasi Dinonaktifkan:</strong> URL Spreadsheet belum diisi. Soal yang Anda buat hanya tersimpan di browser ini (Lokal). Nilai siswa tidak akan terkirim.</div>
+                <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg flex gap-3 items-center">
+                  <AlertCircle size={24}/>
+                  <div><strong>Peringatan!</strong> SCRIPT_URL masih kosong.</div>
                 </div>
               )}
 
-              {/* FORM BUAT / EDIT SOAL */}
-              <div ref={adminFormRef} className={`p-6 rounded-xl shadow-sm border transition-all duration-300 ${editingQuestionId ? 'bg-yellow-50 border-yellow-300 ring-2 ring-yellow-400' : 'bg-white border-gray-200'}`}>
-                <div className="flex justify-between items-center mb-6 border-b pb-2">
-                  <h2 className={`text-2xl font-bold flex items-center gap-2 ${editingQuestionId ? 'text-yellow-800' : 'text-gray-800'}`}>
-                    {editingQuestionId ? <><Edit size={24}/> Edit Soal</> : <><FileText size={24} className="text-blue-600"/> Buat Soal Baru</>}
-                  </h2>
-                  {editingQuestionId && (
-                    <button onClick={resetAdminForm} className="text-sm font-bold flex items-center gap-1 bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200">
-                      <X size={16}/> Batal Edit
-                    </button>
-                  )}
-                </div>
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                <h2 className="text-2xl font-bold mb-6 text-gray-800 border-b pb-2 flex items-center gap-2">
+                  <FileText size={24} className="text-blue-600"/> Buat Soal Baru
+                </h2>
                 
                 <div className="space-y-5">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Tipe Soal</label>
-                      <select value={newQuestionType} onChange={(e) => setNewQuestionType(e.target.value)} className="w-full p-2.5 bg-white border rounded-lg shadow-sm">
+                      <select value={newQuestionType} onChange={(e) => setNewQuestionType(e.target.value)} className="w-full p-2.5 bg-gray-50 border rounded-lg">
                         <option value="pg">Pilihan Ganda (1 Jawaban)</option>
                         <option value="pgk">Pilihan Ganda Kompleks (Lebih dari 1 Jawaban)</option>
                         <option value="bs">Benar/Salah</option>
@@ -461,29 +447,26 @@ export default function App() {
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">Bobot Score Soal Ini</label>
-                      <input type="number" min="1" value={newQuestionScore} onChange={(e) => setNewQuestionScore(e.target.value)} className="w-full p-2.5 bg-white border rounded-lg shadow-sm" />
+                      <input type="number" min="1" value={newQuestionScore} onChange={(e) => setNewQuestionScore(e.target.value)} className="w-full p-2.5 bg-gray-50 border rounded-lg" />
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Pertanyaan</label>
-                    <textarea rows="3" value={newQuestionText} onChange={(e) => setNewQuestionText(e.target.value)} className="w-full p-3 bg-white border rounded-lg shadow-sm"></textarea>
+                    <textarea rows="3" value={newQuestionText} onChange={(e) => setNewQuestionText(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-lg"></textarea>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2"><Image size={16}/> URL Gambar (Link Google Drive) - Opsional</label>
-                    <input type="text" value={newQuestionImage} onChange={(e) => setNewQuestionImage(e.target.value)} className="w-full p-2.5 bg-white border rounded-lg shadow-sm" placeholder="Pastikan akses file di drive publik" />
-                    {newQuestionImage && (
-                      <div className="mt-2 text-xs text-gray-500">Preview: <img src={formatImageUrl(newQuestionImage)} className="h-10 inline rounded border" alt="Preview"/></div>
-                    )}
+                    <label className="block text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2"><Image size={16}/> URL Gambar (Link Google Drive)</label>
+                    <input type="text" value={newQuestionImage} onChange={(e) => setNewQuestionImage(e.target.value)} className="w-full p-2.5 bg-gray-50 border rounded-lg" placeholder="Pastikan akses file: Siapa saja yang memiliki link" />
                   </div>
 
-                  <div className={`${editingQuestionId ? 'bg-yellow-100/50 border-yellow-200' : 'bg-blue-50/50 border-blue-100'} p-4 rounded-lg border`}>
+                  <div className="bg-blue-50/50 p-4 rounded-lg border border-blue-100">
                     {(newQuestionType === 'pg' || newQuestionType === 'pgk') && (
                       <div>
                         <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center justify-between">
                           Opsi Jawaban
-                          <button onClick={handleAddOption} className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${editingQuestionId ? 'bg-yellow-200 text-yellow-800 hover:bg-yellow-300' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}><Plus size={14}/> Tambah</button>
+                          <button onClick={handleAddOption} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"><Plus size={14} className="inline"/> Tambah</button>
                         </h3>
                         <div className="space-y-3">
                           {newOptions.map((opt, idx) => (
@@ -497,7 +480,7 @@ export default function App() {
                               )}
                               <input type="text" value={opt} onChange={(e) => {
                                 const updated = [...newOptions]; updated[idx] = e.target.value; setNewOptions(updated);
-                              }} className="flex-1 p-2 border bg-white rounded shadow-sm" placeholder={`Opsi ${idx + 1}`} />
+                              }} className="flex-1 p-2 border rounded" placeholder={`Opsi ${idx + 1}`} />
                               <button onClick={() => handleRemoveOption(idx)} className="text-red-500 hover:bg-red-50 p-2 rounded"><Trash2 size={18} /></button>
                             </div>
                           ))}
@@ -508,19 +491,19 @@ export default function App() {
                       <div>
                         <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center justify-between">
                           Pernyataan
-                          <button onClick={handleAddStatement} className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${editingQuestionId ? 'bg-yellow-200 text-yellow-800 hover:bg-yellow-300' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`}><Plus size={14}/> Tambah</button>
+                          <button onClick={handleAddStatement} className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200"><Plus size={14} className="inline"/> Tambah</button>
                         </h3>
                         {newStatements.map((stmt, idx) => (
-                          <div key={idx} className="flex items-center gap-3 bg-white p-3 rounded border shadow-sm mb-2">
+                          <div key={idx} className="flex items-center gap-3 bg-white p-3 rounded border mb-2">
                             <input type="text" value={stmt.text} onChange={(e) => {
                               const updated = [...newStatements]; updated[idx].text = e.target.value; setNewStatements(updated);
                             }} className="flex-1 p-2 border rounded text-sm" placeholder="Ketik pernyataan..." />
-                            <label className="text-sm font-bold flex items-center gap-1"><input type="radio" checked={stmt.correct === 'B'} onChange={() => {
+                            <label className="text-sm"><input type="radio" checked={stmt.correct === 'B'} onChange={() => {
                               const updated = [...newStatements]; updated[idx].correct = 'B'; setNewStatements(updated);
-                            }} className="text-green-600 w-4 h-4"/> B</label>
-                            <label className="text-sm font-bold flex items-center gap-1"><input type="radio" checked={stmt.correct === 'S'} onChange={() => {
+                            }} className="text-green-600"/> B</label>
+                            <label className="text-sm"><input type="radio" checked={stmt.correct === 'S'} onChange={() => {
                               const updated = [...newStatements]; updated[idx].correct = 'S'; setNewStatements(updated);
-                            }} className="text-red-600 w-4 h-4"/> S</label>
+                            }} className="text-red-600"/> S</label>
                             <button onClick={() => handleRemoveStatement(idx)} className="text-red-500 hover:bg-red-50 p-1"><Trash2 size={16} /></button>
                           </div>
                         ))}
@@ -528,55 +511,33 @@ export default function App() {
                     )}
                   </div>
 
-                  <button onClick={handleSaveQuestion} disabled={isSavingQuestion} className={`w-full text-white font-bold py-3 rounded-lg flex justify-center items-center gap-2 transition disabled:opacity-50 ${editingQuestionId ? 'bg-yellow-600 hover:bg-yellow-700 shadow-md' : 'bg-blue-800 hover:bg-blue-900'}`}>
-                    {isSavingQuestion ? <span className="animate-pulse">Memproses Data...</span> : editingQuestionId ? <><UploadCloud size={20} /> Simpan Perubahan</> : <><UploadCloud size={20} /> Simpan Soal Baru</>}
+                  <button onClick={handleSaveQuestion} disabled={isSavingQuestion} className="w-full bg-blue-800 text-white font-bold py-3 rounded-lg hover:bg-blue-900 disabled:bg-gray-400 flex justify-center items-center gap-2">
+                    {isSavingQuestion ? <span className="animate-pulse">Menyimpan...</span> : <><UploadCloud size={20} /> Simpan Langsung ke Spreadsheet</>}
                   </button>
                 </div>
               </div>
 
-              {/* DAFTAR SOAL TERMUAT */}
               <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                <h2 className="text-xl font-bold mb-4 border-b pb-2 flex items-center gap-2">
-                  Daftar Soal Tersimpan ({questions.length}) 
-                  {isDeletingQuestion && <span className="text-xs text-red-500 animate-pulse bg-red-50 px-2 py-1 rounded">Sedang menghapus...</span>}
-                </h2>
+                <h2 className="text-xl font-bold mb-4 border-b pb-2">Soal yang Termuat ({questions.length})</h2>
                 <div className="space-y-4">
-                  {questions.length === 0 ? (
-                    <div className="text-center text-gray-500 py-10 bg-gray-50 rounded-lg border border-dashed">
-                      <FileText size={48} className="mx-auto text-gray-300 mb-3" />
-                      <p className="font-semibold">Belum ada soal.</p>
-                    </div>
-                  ) : (
-                    questions.map((q, index) => (
-                      <div key={q.id || index} className={`p-4 border rounded-lg flex flex-col sm:flex-row justify-between gap-4 transition ${editingQuestionId === q.id ? 'ring-2 ring-yellow-400 bg-yellow-50' : 'hover:bg-gray-50'}`}>
-                        <div className="flex-1">
-                          <span className="text-xs bg-gray-200 px-2 py-1 rounded font-bold mr-2">No. {index + 1}</span>
-                          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold mr-2">{q.type.toUpperCase()}</span>
-                          <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded font-bold">Bobot: {q.score || 10}</span>
-                          <p className="font-medium mt-3 text-sm line-clamp-2">{q.text}</p>
-                          {q.image && <span className="text-xs text-blue-500 mt-1 flex items-center gap-1"><Image size={12}/> [Gambar Tersisip]</span>}
-                        </div>
-                        <div className="flex gap-2 sm:flex-col sm:justify-center shrink-0">
-                          <button onClick={() => handleEditClick(q)} className="flex-1 bg-yellow-100 text-yellow-700 hover:bg-yellow-200 p-2 rounded flex justify-center items-center gap-1 font-semibold text-sm transition">
-                            <Edit size={16}/> <span className="sm:hidden">Edit</span>
-                          </button>
-                          <button onClick={() => handleDeleteQuestion(q.id)} disabled={isDeletingQuestion} className="flex-1 bg-red-100 text-red-700 hover:bg-red-200 p-2 rounded flex justify-center items-center gap-1 font-semibold text-sm transition disabled:opacity-50">
-                            <Trash2 size={16}/> <span className="sm:hidden">Hapus</span>
-                          </button>
-                        </div>
+                  {questions.map((q, index) => (
+                    <div key={q.id || index} className="p-4 border rounded-lg flex justify-between">
+                      <div>
+                        <span className="text-xs bg-gray-200 px-2 py-1 rounded font-bold">No. {index + 1} | {q.type.toUpperCase()} | Score Total: {q.score || 10}</span>
+                        <p className="font-medium mt-2">{q.text}</p>
+                        {q.image && <img src={formatImageUrl(q.image)} alt="Preview" className="h-20 mt-2 object-contain border rounded" />}
                       </div>
-                    ))
-                  )}
+                      <button onClick={() => handleDeleteQuestionLocal(q.id)} className="text-red-500 opacity-50 hover:opacity-100 p-1"><Trash2 size={18} /></button>
+                    </div>
+                  ))}
                 </div>
               </div>
-
             </div>
           )
 
         ) : (
           <div className="max-w-4xl mx-auto">
-             {/* --- TAMPILAN PESERTA --- */}
-             {!isDataConfirmed ? (
+            {!isDataConfirmed ? (
               <div className="bg-white p-8 rounded-xl shadow border border-blue-100">
                 <div className="text-center mb-8 border-b pb-6">
                   <h2 className="text-2xl font-bold text-blue-900 uppercase">Konfirmasi Data Peserta</h2>
@@ -588,17 +549,53 @@ export default function App() {
                     <label className="block text-sm font-bold text-gray-700 mb-1">Nama Lengkap</label>
                     <input type="text" value={studentData.nama} onChange={e => setStudentData({...studentData, nama: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-lg uppercase" required />
                   </div>
+                  
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1">Asal Sekolah</label>
-                    <select value={studentData.sekolah} onChange={e => setStudentData({...studentData, sekolah: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-lg uppercase" required>
-                      <option value="" disabled>-- PILIH ASAL SEKOLAH --</option>
-                      {DAFTAR_SEKOLAH.map((sekolah, idx) => <option key={idx} value={sekolah}>{sekolah}</option>)}
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Jenis Kelamin</label>
+                    <select value={studentData.gender} onChange={e => setStudentData({...studentData, gender: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-lg">
+                      <option value="Laki-laki">Laki-laki</option>
+                      <option value="Perempuan">Perempuan</option>
                     </select>
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Tanggal Lahir</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <select value={studentData.hari} onChange={e => setStudentData({...studentData, hari: e.target.value})} className="p-3 bg-gray-50 border rounded-lg">
+                        {[...Array(31)].map((_,i) => <option key={i+1} value={i+1}>{i+1}</option>)}
+                      </select>
+                      <select value={studentData.bulan} onChange={e => setStudentData({...studentData, bulan: e.target.value})} className="p-3 bg-gray-50 border rounded-lg">
+                        {['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'].map(m => <option key={m} value={m}>{m}</option>)}
+                      </select>
+                      <select value={studentData.tahun} onChange={e => setStudentData({...studentData, tahun: e.target.value})} className="p-3 bg-gray-50 border rounded-lg">
+                        {[...Array(20)].map((_,i) => {
+                          const year = new Date().getFullYear() - 5 - i;
+                          return <option key={year} value={year}>{year}</option>
+                        })}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Asal Sekolah</label>
+                    <select 
+                      value={studentData.sekolah} 
+                      onChange={e => setStudentData({...studentData, sekolah: e.target.value})} 
+                      className="w-full p-3 bg-gray-50 border rounded-lg uppercase" 
+                      required
+                    >
+                      <option value="" disabled>-- PILIH ASAL SEKOLAH --</option>
+                      {DAFTAR_SEKOLAH.map((sekolah, idx) => (
+                        <option key={idx} value={sekolah}>{sekolah}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">Token Ujian</label>
                     <input type="text" value={studentData.token} onChange={e => setStudentData({...studentData, token: e.target.value})} className="w-full p-3 bg-gray-50 border rounded-lg uppercase tracking-widest font-mono text-center" required placeholder="MASUKKAN TOKEN" />
                   </div>
+
                   <button type="submit" className="w-full bg-blue-600 text-white font-bold py-4 rounded-lg hover:bg-blue-700 transition mt-6 text-lg flex justify-center items-center gap-2">
                     MULAI UJIAN <Clock size={20}/> (75 Menit)
                   </button>
@@ -607,38 +604,50 @@ export default function App() {
 
             ) : isSubmitted ? (
               <div className="bg-white p-8 rounded-xl shadow-md text-center border-t-8 border-green-500">
+                
                 {isDisqualified && (
                   <div className="bg-red-100 text-red-800 border-2 border-red-500 p-4 rounded-xl mb-6 font-bold flex flex-col items-center justify-center gap-2 shadow-sm">
-                    <AlertTriangle size={32}/> <span>ANDA TELAH DIDISKUALIFIKASI.</span>
+                    <AlertTriangle size={32}/>
+                    <span>ANDA TELAH DIDISKUALIFIKASI KARENA MELANGGAR ATURAN UJIAN (KELUAR DARI APLIKASI).</span>
                   </div>
                 )}
+
                 <Check size={64} className="mx-auto text-green-500 mb-4" />
                 <h2 className="text-3xl font-bold text-gray-800 mb-2">Ujian Selesai!</h2>
                 <p className="text-gray-600 mb-6">Data Anda dan Hasil Ujian telah tersimpan di sistem.</p>
+                
                 <div className="inline-block bg-blue-50 border border-blue-100 p-6 rounded-2xl mb-8">
                   <p className="text-sm text-blue-800 font-semibold mb-1">Total Skor Anda</p>
                   <p className="text-6xl font-black text-blue-600">{score}</p>
                 </div>
+                
+                <div className="text-left bg-gray-50 p-4 rounded-lg inline-block border text-sm w-full max-w-sm mx-auto">
+                  <p><strong>Nama:</strong> {studentData.nama.toUpperCase()}</p>
+                  <p><strong>Sekolah:</strong> {studentData.sekolah.toUpperCase()}</p>
+                  {isDisqualified && <p className="text-red-600 font-bold mt-2">Status: DISKUALIFIKASI</p>}
+                </div>
               </div>
+
             ) : (
               <div className="flex flex-col md:flex-row gap-6">
+                
                 <div className="flex-1 bg-white p-6 sm:p-8 rounded-xl shadow-sm border relative">
                   <div className="flex justify-between items-center mb-6 pb-4 border-b">
                     <span className="bg-blue-100 text-blue-800 font-bold px-3 py-1 rounded-full text-sm">Soal No. {currentQIndex + 1}</span>
-                    <span className="bg-red-50 text-red-600 border border-red-200 font-semibold px-3 py-1 rounded-full text-xs">Pelanggaran: {violationCount}/3</span>
+                    <span className="bg-red-50 text-red-600 border border-red-200 font-semibold px-3 py-1 rounded-full text-xs">
+                       Pelanggaran: {violationCount}/3
+                    </span>
                   </div>
-                  
-                  {questions.length === 0 ? (
-                    <div className="text-center text-gray-500 py-10">
-                      <FileText size={48} className="mx-auto text-gray-300 mb-3" />
-                      <p>Belum ada soal ujian yang tersedia.</p>
-                    </div>
-                  ) : questions[currentQIndex] && (
+
+                  {questions.length > 0 && questions[currentQIndex] && (
                     <>
                       <div className="mb-8 text-lg text-gray-800 leading-relaxed">
                         <p className="mb-4 whitespace-pre-line">{questions[currentQIndex].text}</p>
-                        {questions[currentQIndex].image && <img src={formatImageUrl(questions[currentQIndex].image)} alt="Ilustrasi" className="max-w-full h-auto max-h-64 rounded-lg border object-contain mb-4" />}
+                        {questions[currentQIndex].image && (
+                          <img src={formatImageUrl(questions[currentQIndex].image)} alt="Ilustrasi" className="max-w-full h-auto max-h-64 rounded-lg border object-contain mb-4" />
+                        )}
                       </div>
+
                       <div className="mb-8">
                         {questions[currentQIndex].type === 'pg' && (
                           <div className="space-y-3">
@@ -690,39 +699,42 @@ export default function App() {
                       </div>
                     </>
                   )}
+
                   <div className="flex justify-between items-center pt-4 border-t">
-                    <button onClick={() => setCurrentQIndex(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className={`px-4 py-2 font-medium ${currentQIndex === 0 ? 'text-gray-400' : 'text-blue-600'}`}>Sebelumnya</button>
-                    {questions.length > 0 && currentQIndex === questions.length - 1 ? (
+                    <button onClick={() => setCurrentQIndex(Math.max(0, currentQIndex - 1))} disabled={currentQIndex === 0} className={`px-4 py-2 font-medium ${currentQIndex === 0 ? 'text-gray-400' : 'text-blue-600'}`}>
+                      Sedang Sebelumnya
+                    </button>
+                    {currentQIndex === questions.length - 1 ? (
                       <button onClick={() => calculateAndSubmit(false)} disabled={isSavingResult} className="bg-green-600 text-white px-6 py-2 rounded font-bold hover:bg-green-700 transition">
                         {isSavingResult ? 'Menyimpan...' : 'Selesai Ujian'}
                       </button>
                     ) : (
-                      <button onClick={() => setCurrentQIndex(Math.min(questions.length - 1, currentQIndex + 1))} disabled={questions.length === 0} className="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 transition disabled:opacity-50">Berikutnya</button>
+                      <button onClick={() => setCurrentQIndex(Math.min(questions.length - 1, currentQIndex + 1))} className="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 transition">
+                        Berikutnya
+                      </button>
                     )}
                   </div>
                 </div>
-                
+
                 <div className="md:w-64 bg-white p-4 rounded-xl shadow border self-start sticky top-20">
                   <h3 className="font-bold mb-4 border-b pb-2">Daftar Soal</h3>
-                  {questions.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center">Kosong</p>
-                  ) : (
-                    <div className="grid grid-cols-5 md:grid-cols-4 gap-2">
-                      {questions.map((q, idx) => {
-                        let isAnswered = false;
-                        const ans = userAnswers[q.id];
-                        if (q.type === 'pg' && ans !== undefined) isAnswered = true;
-                        if (q.type === 'pgk' && ans !== undefined && ans.length > 0) isAnswered = true;
-                        if (q.type === 'bs' && ans !== undefined && Object.keys(ans).length === (q.statements?.length || 0)) isAnswered = true;
-                        return (
-                          <button key={idx} onClick={() => setCurrentQIndex(idx)} className={`w-10 h-10 rounded font-bold text-sm transition-transform hover:scale-105 ${currentQIndex === idx ? 'ring-2 ring-blue-600' : ''} ${isAnswered ? 'bg-blue-600 text-white' : 'bg-gray-100 border'}`}>
-                            {idx + 1}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className="grid grid-cols-5 md:grid-cols-4 gap-2">
+                    {questions.map((q, idx) => {
+                      let isAnswered = false;
+                      const ans = userAnswers[q.id];
+                      if (q.type === 'pg' && ans !== undefined) isAnswered = true;
+                      if (q.type === 'pgk' && ans !== undefined && ans.length > 0) isAnswered = true;
+                      if (q.type === 'bs' && ans !== undefined && Object.keys(ans).length === (q.statements?.length || 0)) isAnswered = true;
+
+                      return (
+                        <button key={idx} onClick={() => setCurrentQIndex(idx)} className={`w-10 h-10 rounded font-bold text-sm transition-transform hover:scale-105 ${currentQIndex === idx ? 'ring-2 ring-blue-600' : ''} ${isAnswered ? 'bg-blue-600 text-white' : 'bg-gray-100 border'}`}>
+                          {idx + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+
               </div>
             )}
           </div>
